@@ -103,6 +103,13 @@ export default {
     locationSupported() {
       if ('geolocation' in navigator) return true
       return false
+    },
+    backgroundSyncSupported() {
+      if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        return true;
+      } else {
+        return false;
+      }
     }
   },
   methods: {
@@ -231,10 +238,15 @@ export default {
       })
       .catch(error => {
         console.log('error', error)
-        this.$q.dialog({
-          title: 'Error',
-          message: 'Could not create post'
-        })
+        if (!navigator.onLine && this.backgroundSyncSupported) {
+          this.$q.notify('Post created offline')
+          this.$router.push('/')
+        } else {
+          this.$q.dialog({
+            title: 'Error',
+            message: 'Could not create post'
+          })
+        }
         this.$q.loading.hide()
       })
     }

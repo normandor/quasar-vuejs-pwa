@@ -3,7 +3,19 @@
     <div class="row q-col-gutter-lg">
       <div class="col-12 col-sm-8">
         <template v-if="!loadingPosts && posts.length">
-          <q-card v-for="post in posts" :key="post.id" class="card-post q-mb-md" bordered flat>
+          <q-card
+            v-for="post in posts"
+            :key="post.id"
+            class="card-post q-mb-md"
+            :class="{ 'bg-red-1' : post.offline }"
+            bordered
+            flat
+          >
+          <q-badge v-if="post.offline" color="red"
+          class="absolute-top-right badge-offline"
+          >
+            Offline
+          </q-badge>
             <q-item>
               <q-item-section avatar>
                 <q-avatar>
@@ -85,6 +97,7 @@
 
 <script>
 import { date } from 'quasar';
+import { openDB } from 'idb';
 
 export default {
   name: 'PageHome',
@@ -94,6 +107,11 @@ export default {
       loadingPosts: false
     }
   },
+  computed: {
+    serviceWorkerSupported() {
+      return 'serviceWorker' in navigator
+    }
+  },
   methods: {
     getPosts() {
       this.loadingPosts = true
@@ -101,18 +119,63 @@ export default {
         .then(response => {
           this.posts = response.data
           this.loadingPosts = false
+          if (!navigator.onLine) {
+            this.getOfflinePosts()
+          }
         })
         .catch(err => {
-          this.$q.dialog({
+                    this.$q.dialog({
             title: 'Error',
             message: 'Could not fetch posts'
           })
           this.loadingPosts = false
         })
+    },
+    getOfflinePosts() {
+      let db = openDB('workbox-background-sync').then(db => {
+        db.getAll('requests').then(failedRequests => {
+          failedRequests.forEach(failedRequest => {
+            if (failedRequest.queueName == 'createPostQueue') {
+              let request = new Request(failedRequest.requestData.url, failedRequest.requestData)
+              request.formData().then(formData => {
+                let offlinePost = {}
+                offlinePost.id = formData.get('id')
+                offlinePost.caption = formData.get('caption')
+                offlinePost.location = formData.get('location')
+                offlinePost.date = parseInt(formData.get('date'))
+                offlinePost.offline = true
+
+                let reader = new FileReader()
+                reader.readAsDataURL(formData.get('file'))
+                reader.onloadend = () => {
+                  offlinePost.imageUrl = reader.result
+                  this.posts.unshift(offlinePost)
+                }
+              })
+            }
+          })
+        }).catch(err => {
+          console.log('error accessing indexed db');
+        })
+      })
+    },
+    listenForOfflinePostUploaded() {
+      if (this.serviceWorkerSupported) {
+        const channel = new BroadcastChannel('sw-messages');
+        channel.addEventListener('message', event => {
+            if (event.data.msg == 'offline-post-uploaded') {
+              let offlinePostCount = this.posts.filter(post => post.offline == true).length
+              this.posts[offlinePostCount - 1].offline = false
+            }
+        });
+      }
     }
   },
-  created() {
+  activated() { // when the user visits the page
     this.getPosts()
+  },
+  created() {
+    this.listenForOfflinePostUploaded()
   },
   filters: {
     niceDate(value) {
@@ -124,6 +187,8 @@ export default {
 
 <style lang="sass">
   .card-post
-    .q-image
+    .badge-offline
+      border-top-left-radius: 0 !important
+    .q-img
       min-height: 200px
 </style>
