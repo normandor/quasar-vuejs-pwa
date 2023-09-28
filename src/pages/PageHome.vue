@@ -1,5 +1,55 @@
 <template>
   <q-page class="constrain q-pa-md">
+  <transition
+      appear
+      enter-active-class="animated fadeIn"
+      leave-active-class="animated fadeOut"
+    >
+      <div
+        v-if="pushNotificationsSupported && showNotificationsBanner"
+        class="banner-container bg-primary"
+      >
+        <div class="constrain">
+          <q-banner
+            class="bg-grey-3 q-mb-md"
+            inline-actions
+          >
+            <template v-slot:avatar>
+              <q-icon
+                name="eva-bell-outline"
+                color="primary"
+              />
+            </template>
+
+            Would you like to enable notifications?
+
+            <template v-slot:action>
+              <q-btn
+                @click="enableNotifications"
+                label="Yes"
+                color="primary"
+                class="q-px-sm"
+                flat
+              />
+              <q-btn
+                @click="showNotificationsBanner = false"
+                label="Later"
+                color="primary"
+                class="q-px-sm"
+                flat
+              />
+              <q-btn
+                @click="neverShowNotificationsBanner"
+                label="Never"
+                color="primary"
+                class="q-px-sm"
+                flat
+              />
+            </template>
+          </q-banner>
+        </div>
+      </div>
+    </transition>
     <div class="row q-col-gutter-lg">
       <div class="col-12 col-sm-8">
         <template v-if="!loadingPosts && posts.length">
@@ -96,20 +146,25 @@
 </template>
 
 <script>
-import { date } from 'quasar';
-import { openDB } from 'idb';
+import { date } from 'quasar'
+import { openDB } from 'idb'
+let qs = require('qs')
 
 export default {
   name: 'PageHome',
   data() {
     return {
       posts: [],
-      loadingPosts: false
+      loadingPosts: false,
+      showNotificationsBanner: false
     }
   },
   computed: {
     serviceWorkerSupported() {
       return 'serviceWorker' in navigator
+    },
+    pushNotificationsSupported() {
+      return 'PushManager' in window
     }
   },
   methods: {
@@ -169,6 +224,103 @@ export default {
             }
         });
       }
+    },
+    initNotificationsBanner() {
+      let neverShowNotificationsBanner = this.$q.localStorage.getItem('neverShowNotificationsBanner')
+
+      console.log('neverShowNotificationsBanner', neverShowNotificationsBanner)
+
+      if (!neverShowNotificationsBanner) {
+        this.showNotificationsBanner = true   
+      }
+    },
+    enableNotifications() {
+      if (this.pushNotificationsSupported) {
+        Notification.requestPermission(result => {
+          this.neverShowNotificationsBanner()
+          if (result == 'granted') {
+            // this.displayGrantedNotification()
+            this.checkForExistingPushSubscription()
+          }
+        })
+      }
+    },
+    checkForExistingPushSubscription() {
+      let reg
+      if (this.serviceWorkerSupported && this.pushNotificationsSupported) {
+        navigator.serviceWorker.ready.then(swreg => {
+          reg = swreg
+          return swreg.pushManager.getSubscription()
+        }).then(sub => {
+          if (!sub) {
+            this.createPushSubscription(reg)
+          }
+        })
+      }
+    },
+    createPushSubscription(reg) {
+      let vapidPublicKey = 'BG4Dtbzl48JZsd5yJIXNufu_k98856Y1GeNNogj5JSSee452e_O7EDs9XfOtxvKvwOWm6GK5Zz9K5D98cJCh4oA'
+      // reg.pushManager.subscribe()
+      reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidPublicKey
+      }).then(newSub => {
+        let newSubData = newSub.toJSON(),
+            newSubDataQS = qs.stringify(newSubData)
+        console.log('sending request')
+        return this.$axios.post(`${ process.env.API }/createSubscription?${ newSubDataQS }`)
+      }).then(response => {
+        this.displayGrantedNotification()
+      }).catch(err => {
+        console.log('err', err);
+      })
+    },
+    neverShowNotificationsBanner() {
+      this.showNotificationsBanner = false
+      this.$q.localStorage.set('neverShowNotificationsBanner', true)
+    },
+    displayGrantedNotification() {
+      // new Notification('You have subscribed to notifications',
+      // {
+      //   body: 'Thanks for subcribing',
+      //   icon: 'public/icons/icon-128x128.png',
+      //   image: 'public/icons/icon-128x128.png',
+      //   badge: 'public/icons/icon-128x128.png',
+      //   dir: 'rtl',
+      //   lang: 'en',
+      //   vibrate: [100, 50, 200],
+      //   tag: 'confirm-notification',
+      //   renotify: true,
+      // })
+
+      if (this.serviceWorkerSupported && this.pushNotificationsSupported) {
+        navigator.serviceWorker.ready.then(swreg => {
+          swreg.showNotification('You have subscribed to notifications',
+          {
+            body: 'Thanks for subcribing',
+            icon: 'public/icons/icon-128x128.png',
+            image: 'public/icons/icon-128x128.png',
+            badge: 'public/icons/icon-128x128.png',
+            dir: 'rtl',
+            lang: 'en',
+            vibrate: [100, 50, 200],
+            tag: 'confirm-notification',
+            renotify: true,
+            actions: [
+              {
+                action: 'hello',
+                title: 'Hello',
+                icon: 'public/icons/icon-128x128.png',
+              },
+              {
+                action: 'goodbye',
+                title: 'Goodbye',
+                icon: 'public/icons/icon-128x128.png',
+              }
+            ]
+          })
+        })
+      }
     }
   },
   activated() { // when the user visits the page
@@ -176,6 +328,7 @@ export default {
   },
   created() {
     this.listenForOfflinePostUploaded()
+    this.initNotificationsBanner()
   },
   filters: {
     niceDate(value) {

@@ -27,11 +27,18 @@ let path = require('path')
 let os = require('os')
 let fs = require('fs')
 let UUID = require('uuid-v4')
+let webpush = require('web-push')
 
 const db = getFirestore();
 
 const app = express();
 const port = 3000;
+
+webpush.setVapidDetails(
+  'mailto:test@test.com',
+  'BG4Dtbzl48JZsd5yJIXNufu_k98856Y1GeNNogj5JSSee452e_O7EDs9XfOtxvKvwOWm6GK5Zz9K5D98cJCh4oA',
+  'dummy'
+);
 
 app.get("/posts", (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
@@ -111,12 +118,51 @@ app.post("/createPost", (req, res) => {
         imageUrl: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${uploadedFile.name}?alt=media&token=${uuid}`
       })
       .then(() => {
+        sendPushNotification()
         res.send('post added: ' + fields.id)
       })
+    }
+
+    function sendPushNotification() {
+      let subscriptions = []
+      db.collection('subscriptions')
+        .get()
+        .then((snapshot) => {
+          snapshot.forEach((doc) => {
+            subscriptions.push(doc.data());
+          });
+          return subscriptions
+        }).then(subscriptions => {
+          subscriptions.forEach(subscription => {
+            const pushSubscription = {
+              endpoint: subscription.endpoint,
+              keys: {
+                auth: subscription.keys.auth,
+                p256dh: subscription.keys.p256dh
+              }
+            };
+            let pushContent = {
+              title: 'New Quasagram post', 
+              body: 'New post added!'
+            }
+            webpush.sendNotification(pushSubscription, JSON.stringify(pushContent));
+          })
+        })
     }
     // res.writeHead(303, { Connection: "close", Location: "/" });
   });
   req.pipe(bb);
+});
+
+app.post("/createSubscription", (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  db.collection('subscriptions').add(req.query).then(docRef => {
+    res.send({
+      message: 'Subscription added',
+      postData: req.query
+    })
+  })
+
 });
 
 app.listen(port, () => {
