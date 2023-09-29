@@ -143,7 +143,8 @@ app.post("/createPost", (req, res) => {
             };
             let pushContent = {
               title: 'New Quasagram post', 
-              body: 'New post added!'
+              body: 'New post added!',
+              openUrl: '/#/'
             }
             webpush.sendNotification(pushSubscription, JSON.stringify(pushContent));
           })
